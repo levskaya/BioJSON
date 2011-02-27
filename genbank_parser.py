@@ -18,29 +18,15 @@ locusgrammar = Literal("LOCUS") + \
                Suppress(Optional(Word(alphas))) + \
                Word(alphas+nums+'-')    
 
-#gbtest ="LOCUS       EU482404                 598 bp    mRNA    linear   INV 04-MAR-2008"
-#apetest="LOCUS                  New_DNA        2963 bp ds-DNA   linear       13-JAN-2011"
-#ntitest="LOCUS       F-GFAP-gCaMP3-W       11512 bp    DNA     circular     14-JUN-2010"
-#print locusgrammar.parseString(apetest)
-#print locusgrammar.parseString(gbtest)
-#print locusgrammar.parseString(ntitest)
-
-SimpleSlice=Group(Word(nums+"<>") + \
-                  Suppress(Literal("..")) + \
-                  Word(nums+"<>")
-                  )
-
 LPAREN = Suppress("(")
 RPAREN = Suppress(")")
+SEP = Suppress(Literal(".."))
+Integer = Word(nums+"<>").setParseAction(lambda s,l,t: int(t[0].replace("<","").replace(">","")) )
+SimpleSlice=Group(Integer + SEP + Integer)
+
 complexSlice = Forward()
 complexSlice << (Literal("complement")|Literal("join"))+LPAREN+Group(delimitedList(complexSlice)|delimitedList(SimpleSlice)+RPAREN)
 featLocation = Group(SimpleSlice|complexSlice)
-
-#print featLocation.parseString("345..6565")
-#print featLocation.parseString("complement(345..6565)")
-#print featLocation.parseString("join(345..6565,7888..9999,12340..13000)")
-#print featLocation.parseString("join(complement(12..56),complement(99..1039))")
-#print featLocation.parseString("complement(join(12..56,99..1039))")
 
 Feature = Word(alphas+nums+"_-").setResultsName("type") + \
           featLocation + \
@@ -50,8 +36,21 @@ Feature = Word(alphas+nums+"_-").setResultsName("type") + \
                     ))
 Features = Suppress(Literal("FEATURES")+Literal("Location/Qualifiers"))+OneOrMore(Feature)
 
+print locusgrammar.searchString(infile)
 
-print Features.parseString(apefeatures)
+for feat in Feature.searchString(infile):
+    foo=feat.asList()
+    fdict = dict(foo[2:])
+    fdict["type"]=foo[0]
+    fdict["loc"]=foo[1]
+    print fdict
+
+
+Sequence = OneOrMore(Suppress(Word(nums)) + OneOrMore(Word("ACGTacgtNn")))
+SequenceRegion = Suppress(Literal("ORIGIN"))+Sequence+Suppress(Literal('//'))
+
+print "".join(SequenceRegion.searchString(infile)[0])
+
 
 
 
