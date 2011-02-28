@@ -149,11 +149,11 @@ if __name__ == "__main__":
              "features" : map(dict,parsed['features'].asList())
              }
 
-
-    print json.dumps(jseq)
+    #print json.dumps(jseq)
 
     outfile=open(args[1],'w')
     json.dump(jseq,outfile)
+
 
 
 # Cruft that needs moved to unit tests
