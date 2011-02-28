@@ -27,7 +27,6 @@ SpacedLine =  White(min=1) + CharsNotIn("\n") + LineEnd()
 GenericEntry =  Dict(Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
                              ZeroOrMore( SpacedLine ))))
 
-
 # GenBank LOCUS Entry Parser
 #===============================================================================
 # LOCUS string, the first line of any genbank-sh file
@@ -46,6 +45,7 @@ LocusEntry =   Literal("LOCUS") + \
 #==== Genbank Location String Parser
 #
 # a string of slices w. functional modifiers that go at most two levels deep
+# single position is just a number i.e. 23423
 # slice is N1..N2  w. N1<N2
 # i.e.
 # 23..88  --> seq[23:89] in python syntax (genbank uses inclusive slicing)
@@ -69,7 +69,7 @@ SEP = Suppress(Literal(".."))
 
 #recognize numbers w. < & > uncertainty specs, then strip the <> chars to make it fixed
 gbIndex = Word(nums+"<>").setParseAction(lambda s,l,t: int(t[0].replace("<","").replace(">","")) )
-SimpleSlice=Group(gbIndex + SEP + gbIndex)
+SimpleSlice=Group(gbIndex + SEP + gbIndex) | Group(gbIndex).setParseAction(lambda s,l,t: [[t[0][0],t[0][0]]])
 
 complexSlice = Forward()
 complexSlice << (Literal("complement") | Literal("join")) + LPAREN + ( delimitedList(complexSlice) | delimitedList(SimpleSlice) ) + RPAREN 
@@ -87,31 +87,41 @@ def parseGBLoc(s,l,t):
 
     for entry in t[0]:
         if type(entry)!=type("string"):
-            locationlist.append([entry[0],entry[1],strand])
+            locationlist.append([entry[0],entry[1]])
             
     #return locationlist
-    return [['location', locationlist ]]
+    return [['location', locationlist ], ['strand',strand] ]
 
 featLocation.setParseAction(parseGBLoc)
 
 #==== Genbank Feature Key-Value Pairs
+def strip_multiline(s,l,t):
+    whitespace=re.compile("[\n]{1}[ ]+")
+    return whitespace.sub(" ",t[0])
 
-# NCBI feature format:   /key="value"
-NCBIFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + QuotedString('"',multiline=True) )                    
-# ApE doesn't put its vals in quotes!   /key=value  (I'm assuming it doesn't do multilines this way?)
-ApEFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + OneOrMore(CharsNotIn("\n")) )
+# Quoted KeyVal:   /key="value"
+QuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + QuotedString('"',multiline=True).setParseAction( strip_multiline ) )
+
+# UnQuoted KeyVal: /key=value  (I'm assuming it doesn't do multilines this way?)
+NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + OneOrMore(CharsNotIn("\n")) )
+
+# Special Case for Numerical Vals
+NumFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + Optional(Suppress("\"")) + Word(nums).setParseAction(lambda s,l,t: int(t[0]) ) + Optional(Suppress("\"")) ) 
+
+# Key Only KeyVal: /pseudo
+# post-parse convert it into a pair to resemble the structure of the first two cases i.e. [pseudo, True]
+FlagFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-")).setParseAction(lambda s,l,t: [[t[0][0],True]] )
 
 Feature = Group( Word(alphas+nums+"_-").setResultsName("type").setParseAction(lambda s,l,t: [ ["type", t[0]] ] ) +\
                  featLocation.setResultsName("location") +\
-                 OneOrMore( NCBIFeaturekeyval | ApEFeaturekeyval ) )
+                 OneOrMore( NumFeaturekeyval | QuoteFeaturekeyval | NoQuoteFeaturekeyval | FlagFeaturekeyval ) )
 
 FeaturesEntry = Literal("FEATURES") + Literal("Location/Qualifiers") + Group(OneOrMore(Feature)).setResultsName("features")
-
 
 # GenBank Sequence Parser
 #===============================================================================
 # sequence is just a column-spaced big table of dna nucleotides
-# should recognize full IUPAC alphabet
+# should it recognize full IUPAC alphabet?  NCBI uses n for unknown region
 Sequence = OneOrMore(Suppress(Word(nums)) + OneOrMore(Word("ACGTacgtNn")))
 
 # Group(  ) hides the setResultsName names def'd inside, such that one needs to first access this group and then access the dict of contents inside
@@ -124,7 +134,15 @@ SequenceEntry = Group(Literal("ORIGIN") + Sequence.setResultsName("sequence").se
 #GB files with multiple records split by "//" sequence at beginning of line
 GBEnd = Literal("//")
 
+#for debugging, print location and return token unaltered
+def shout(s,l,t):
+    print l
+    return t
+
+#GB = LocusEntry + OneOrMore(FeaturesEntry | SequenceEntry | GenericEntry) + GBEnd.setParseAction(shout)
 GB = LocusEntry + OneOrMore(FeaturesEntry | SequenceEntry | GenericEntry) + GBEnd
+
+multipleGB = OneOrMore(Group(GB))
 
 #===============================================================================
 # End Genbank Parser
@@ -136,24 +154,36 @@ if __name__ == "__main__":
     #parser.add_option("-o", "--output", dest="output",
     #                  help="output json file")
     (options, args) = parser.parse_args()
-    
-    infile = open(args[0],'r').read()
 
-    parsed = GB.parseString(infile)
-    
-    jseq = { "name" : parsed["name"],
-             "type" : parsed["moleculetype"],
-             "date" : parsed["date"],
-             "topology" : parsed["topology"],
-             "sequence" : parsed["sequence"]["sequence"],
-             "features" : map(dict,parsed['features'].asList())
-             }
+    if len(args)>0:
+        infile = open(args[0],'r').read()
+        parsed = multipleGB.parseString(infile)
 
-    #print json.dumps(jseq)
+        jseqlist=[]
+        for seq in parsed:
+            # print "NAME: ", seq['name']
+            # for f in seq['features'].asList():
+            #     #print dict(f)['type']
+            #     if dict(f)['type']=="gap":
+            #         print dict(f)
 
-    outfile=open(args[1],'w')
-    json.dump(jseq,outfile)
+            print seq['name'], ":  length:", len(seq['sequence']['sequence']) , " #features:" , len(seq['features'].asList())
 
+            jseq = { "name" : seq["name"],
+                     "type" : seq["moleculetype"],
+                     "date" : seq["date"],
+                     "topology" : seq["topology"],
+                     "sequence" : seq["sequence"]["sequence"],
+                     "features" : map(dict,seq['features'].asList())
+                     }
+
+            jseqlist.append(jseq)
+            
+        outfile=open(args[1],'w')
+        if len(jseqlist)>1:
+            json.dump(jseqlist,outfile)
+        else:
+            json.dump(jseqlist[0],outfile)
 
 
 # Cruft that needs moved to unit tests
