@@ -15,6 +15,11 @@ from pyparsing import *
 # GenBank Grammar
 #===============================================================================
 
+#for debugging, print location and return token unaltered
+def printf(s,l,t):
+    print l
+    return t
+
 # Generic Entry
 #===============================================================================
 
@@ -32,7 +37,7 @@ GenericEntry =  Dict(Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
 # LOCUS string, the first line of any genbank-sh file
 # unlike many shite parsers, this should work for NCBI, ApE, and NTI style gb files
 LocusEntry =   Literal("LOCUS") + \
-               Word(alphas+nums+'-_').setResultsName("name") + \
+               Word(alphas+nums+'-_'+'\\').setResultsName("name") + \
                Word(nums)+Suppress(Literal('bp')) + \
                Word(alphas+'-').setResultsName("moleculetype") + \
                (Literal("linear")|Literal("circular")).setResultsName("topology") + \
@@ -106,7 +111,10 @@ QuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('='
 NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + OneOrMore(CharsNotIn("\n")) )
 
 # Special Case for Numerical Vals
-NumFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + Optional(Suppress("\"")) + Word(nums).setParseAction(lambda s,l,t: int(t[0]) ) + Optional(Suppress("\"")) ) 
+NumFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') +\
+                         (Suppress("\"")+Word(nums).setParseAction(lambda s,l,t: int(t[0]) )+Suppress("\"")) | \
+                         (Word(nums).setParseAction(lambda s,l,t: int(t[0]) ) ) \
+                         )
 
 # Key Only KeyVal: /pseudo
 # post-parse convert it into a pair to resemble the structure of the first two cases i.e. [pseudo, True]
@@ -125,7 +133,7 @@ FeaturesEntry = Literal("FEATURES") + Literal("Location/Qualifiers") + Group(One
 Sequence = OneOrMore(Suppress(Word(nums)) + OneOrMore(Word("ACGTacgtNn")))
 
 # Group(  ) hides the setResultsName names def'd inside, such that one needs to first access this group and then access the dict of contents inside
-SequenceEntry = Group(Literal("ORIGIN") + Sequence.setResultsName("sequence").setParseAction(lambda s,l,t: "".join(t) )).setResultsName("sequence")
+SequenceEntry = Suppress(Literal("ORIGIN")) + Sequence.setParseAction(lambda s,l,t: "".join(t) ).setResultsName("sequence")
 
 
 # Final GenBank Parser
@@ -134,12 +142,6 @@ SequenceEntry = Group(Literal("ORIGIN") + Sequence.setResultsName("sequence").se
 #GB files with multiple records split by "//" sequence at beginning of line
 GBEnd = Literal("//")
 
-#for debugging, print location and return token unaltered
-def shout(s,l,t):
-    print l
-    return t
-
-#GB = LocusEntry + OneOrMore(FeaturesEntry | SequenceEntry | GenericEntry) + GBEnd.setParseAction(shout)
 GB = LocusEntry + OneOrMore(FeaturesEntry | SequenceEntry | GenericEntry) + GBEnd
 
 multipleGB = OneOrMore(Group(GB))
@@ -148,9 +150,14 @@ multipleGB = OneOrMore(Group(GB))
 # End Genbank Parser
 #===============================================================================
 
+
+# Main JSON Conversion Routine
+#===============================================================================
+
 if __name__ == "__main__":
-    #parse command line string 
-    parser = OptionParser()
+    #parse command line string
+    usage = "usage: %prog [options] gbfile_in jseqfile_out"
+    parser = OptionParser(usage)
     #parser.add_option("-o", "--output", dest="output",
     #                  help="output json file")
     (options, args) = parser.parse_args()
@@ -167,13 +174,13 @@ if __name__ == "__main__":
             #     if dict(f)['type']=="gap":
             #         print dict(f)
 
-            print seq['name'], ":  length:", len(seq['sequence']['sequence']) , " #features:" , len(seq['features'].asList())
-
+            print seq['name'], ":  length:", len(seq['sequence']) , " #features:" , len(seq['features'].asList())
+            
             jseq = { "name" : seq["name"],
                      "type" : seq["moleculetype"],
                      "date" : seq["date"],
                      "topology" : seq["topology"],
-                     "sequence" : seq["sequence"]["sequence"],
+                     "sequence" : seq["sequence"],
                      "features" : map(dict,seq['features'].asList())
                      }
 
@@ -185,22 +192,3 @@ if __name__ == "__main__":
         else:
             json.dump(jseqlist[0],outfile)
 
-
-# Cruft that needs moved to unit tests
-"""
-for k in ("name","topology","date","moleculetype"):
-    print k + ": " + parsed[k]
-
-for f in parsed['features']:
-    print "-"*20
-    df=dict(f.asList())
-    for k in df.keys():
-        print k, " : ", df[k]
-
- print featLocation.parseString("complement(join(34..99,555..999))")
- print featLocation.parseString("join(complement(34..99),complement(555..999))")
- print featLocation.parseString("34..55")
- print featLocation.parseString("complement(34..55)")
- print featLocation.parseString("join(34..99,555..999,1234..7777)")
- print parsed
-"""
