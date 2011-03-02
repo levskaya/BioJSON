@@ -17,7 +17,7 @@ from pyparsing import *
 
 #for debugging, print location and return token unaltered
 def printf(s,l,t):
-    print l
+    print l,": ",t
     return t
 
 # Generic Entry
@@ -29,8 +29,8 @@ CapWord = Word("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 # this is how we split up the genbank record
 SpacedLine =  White(min=1) + CharsNotIn("\n") + LineEnd()
 #HeaderLine = CapWord + CharsNotIn("\n") + LineEnd()
-GenericEntry =  Dict(Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
-                             ZeroOrMore( SpacedLine ))))
+GenericEntry =  Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
+                             ZeroOrMore( SpacedLine ))).setResultsName("generics",listAllMatches=True)
 
 # GenBank LOCUS Entry Parser
 #===============================================================================
@@ -103,6 +103,8 @@ featLocation.setParseAction(parseGBLoc)
 def strip_multiline(s,l,t):
     whitespace=re.compile("[\n]{1}[ ]+")
     return whitespace.sub(" ",t[0])
+def toInt(s,l,t):
+    return int(t[0])
 
 # Quoted KeyVal:   /key="value"
 QuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + QuotedString('"',multiline=True).setParseAction( strip_multiline ) )
@@ -112,8 +114,8 @@ NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('
 
 # Special Case for Numerical Vals
 NumFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') +\
-                         (Suppress("\"")+Word(nums).setParseAction(lambda s,l,t: int(t[0]) )+Suppress("\"")) | \
-                         (Word(nums).setParseAction(lambda s,l,t: int(t[0]) ) ) \
+                         (Suppress("\"")+Word(nums).setParseAction(toInt)+Suppress("\"")) | \
+                         (Word(nums).setParseAction(toInt) ) \
                          )
 
 # Key Only KeyVal: /pseudo
@@ -154,6 +156,34 @@ multipleGB = OneOrMore(Group(GB))
 # Main JSON Conversion Routine
 #===============================================================================
 
+def strip_indent(str):
+    whitespace=re.compile("[\n]{1}(COMMENT){0,1}[ ]+")
+    return whitespace.sub("\n",str)
+
+def concat_dict(dlist):
+    """more or less dict(list of string pairs) but merges
+    vals with the same keys so no duplicates occur
+    """
+    newdict={}
+    for e in dlist:
+        if e[0] in newdict.keys():
+            newdict[e[0]]=(newdict[e[0]]+strip_indent(e[1]))
+        else:
+            newdict[e[0]]=strip_indent(e[1])
+    return newdict
+
+def append_dict(dlist):
+    """more or less dict(list of string pairs) but merges
+    vals with the same keys so no duplicates occur
+    """
+    newdict={}
+    for e in dlist:
+        if e[0] in newdict.keys():
+            newdict[e[0]]=(newdict[e[0]] + [ strip_indent(e[1]) ])
+        else:
+            newdict[e[0]]=[ strip_indent(e[1]) ]
+    return newdict
+            
 if __name__ == "__main__":
     #parse command line string
     usage = "usage: %prog [options] gbfile_in jseqfile_out"
@@ -168,11 +198,6 @@ if __name__ == "__main__":
 
         jseqlist=[]
         for seq in parsed:
-            # print "NAME: ", seq['name']
-            # for f in seq['features'].asList():
-            #     #print dict(f)['type']
-            #     if dict(f)['type']=="gap":
-            #         print dict(f)
 
             print seq['name'], ":  length:", len(seq['sequence']) , " #features:" , len(seq['features'].asList())
             
@@ -181,7 +206,8 @@ if __name__ == "__main__":
                      "date" : seq["date"],
                      "topology" : seq["topology"],
                      "sequence" : seq["sequence"],
-                     "features" : map(dict,seq['features'].asList())
+                     "features" : map(dict,seq['features'].asList()),
+                     "annotations" : concat_dict(seq['generics'])
                      }
 
             jseqlist.append(jseq)
