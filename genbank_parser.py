@@ -11,7 +11,6 @@ import json
 from optparse import OptionParser
 from pyparsing import *
 
-
 #for debugging, print location and return token unaltered
 def printf(s,l,t):
     print l,": ",t
@@ -50,6 +49,11 @@ SpacedLine =  White(min=1) + CharsNotIn("\n") + LineEnd()
 GenericEntry =  Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
                              ZeroOrMore( SpacedLine ))).setResultsName("generics",listAllMatches=True)
 
+
+#===============================================================================
+# Definition Entry
+#SuppressedSpacedLine =  Suppress(White(min=1)) + CharsNotIn("\n") + LineEnd()
+#DefinitionEntry =  Suppress(Literal("DEFINITION")) + Combine(CharsNotIn("\n") + LineEnd() + ZeroOrMore( SuppressedSpacedLine ))
 
 #===============================================================================
 # GenBank Feature Table Parser
