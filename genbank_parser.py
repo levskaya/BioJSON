@@ -11,29 +11,19 @@ import json
 from optparse import OptionParser
 from pyparsing import *
 
-#===============================================================================
-# GenBank Grammar
-#===============================================================================
 
 #for debugging, print location and return token unaltered
 def printf(s,l,t):
     print l,": ",t
     return t
 
-# Generic Entry
+#===============================================================================
+# GenBank Grammar
 #===============================================================================
 
-# All entries in a genbank file headed by an all-caps title with no space between start-of-line and title
-CapWord = Word("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-# after titled line, all subsequent lines have to have at least one space in front of them
-# this is how we split up the genbank record
-SpacedLine =  White(min=1) + CharsNotIn("\n") + LineEnd()
-#HeaderLine = CapWord + CharsNotIn("\n") + LineEnd()
-GenericEntry =  Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
-                             ZeroOrMore( SpacedLine ))).setResultsName("generics",listAllMatches=True)
-
+#===============================================================================
 # GenBank LOCUS Entry Parser
-#===============================================================================
+
 # LOCUS string, the first line of any genbank-sh file
 # unlike many shite parsers, this should work for NCBI, ApE, and NTI style gb files
 LocusEntry =   Literal("LOCUS") + \
@@ -44,8 +34,25 @@ LocusEntry =   Literal("LOCUS") + \
                Suppress(Optional(Word(alphas))) + \
                Word(alphas+nums+'-').setResultsName("date")
 
-# GenBank Feature Table Parser
 #===============================================================================
+# Generic Entry
+
+# this catches everything but the FEATURES and SEQUENCE entries, really should add parsing code for
+# ACCESSION, COMMENTS, REFERENCE, ORGANISM, etc.
+# (Though these entries are generally useless when it comes to hacking on DNA)
+
+# All entries in a genbank file headed by an all-caps title with no space between start-of-line and title
+CapWord = Word("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+# after titled line, all subsequent lines have to have at least one space in front of them
+# this is how we split up the genbank record
+SpacedLine =  White(min=1) + CharsNotIn("\n") + LineEnd()
+#HeaderLine = CapWord + CharsNotIn("\n") + LineEnd()
+GenericEntry =  Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
+                             ZeroOrMore( SpacedLine ))).setResultsName("generics",listAllMatches=True)
+
+
+#===============================================================================
+# GenBank Feature Table Parser
 
 #==== Genbank Location String Parser
 #
@@ -76,13 +83,13 @@ SEP = Suppress(Literal(".."))
 gbIndex = Word(nums+"<>").setParseAction(lambda s,l,t: int(t[0].replace("<","").replace(">","")) )
 SimpleSlice=Group(gbIndex + SEP + gbIndex) | Group(gbIndex).setParseAction(lambda s,l,t: [[t[0][0],t[0][0]]])
 
+#recursive def for nested function syntax:  f( g(), g() )
 complexSlice = Forward()
 complexSlice << (Literal("complement") | Literal("join")) + LPAREN + ( delimitedList(complexSlice) | delimitedList(SimpleSlice) ) + RPAREN 
 featLocation = Group( SimpleSlice | complexSlice)
 
 def parseGBLoc(s,l,t):
-    """retwingles parsed genbank location strings,
-    assumes no joins of RC and FWD sequences """
+    """retwingles parsed genbank location strings, assumes no joins of RC and FWD sequences """
     strand = 1
     locationlist=[]
     
@@ -94,8 +101,8 @@ def parseGBLoc(s,l,t):
         if type(entry)!=type("string"):
             locationlist.append([entry[0],entry[1]])
             
-    #return locationlist
-    return [['location', locationlist ], ['strand',strand] ]
+    #return locationlist and strand spec
+    return [ ['location', locationlist ], ['strand',strand] ]
 
 featLocation.setParseAction(parseGBLoc)
 
@@ -112,24 +119,26 @@ QuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('='
 # UnQuoted KeyVal: /key=value  (I'm assuming it doesn't do multilines this way?)
 NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + OneOrMore(CharsNotIn("\n")) )
 
-# Special Case for Numerical Vals
-NumFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') +\
-                         (Suppress("\"")+Word(nums).setParseAction(toInt)+Suppress("\"")) | \
+# Special Case for Numerical Vals:  /bases=12  OR  /bases="12"
+NumFeaturekeyval = Group( Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') +\
+                         (Suppress("\"") + Word(nums).setParseAction(toInt) + Suppress("\"") ) | \
                          (Word(nums).setParseAction(toInt) ) \
                          )
 
 # Key Only KeyVal: /pseudo
-# post-parse convert it into a pair to resemble the structure of the first two cases i.e. [pseudo, True]
+# post-parse convert it into a pair to resemble the structure of the first three cases i.e. [pseudo, True]
 FlagFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-")).setParseAction(lambda s,l,t: [[t[0][0],True]] )
 
-Feature = Group( Word(alphas+nums+"_-").setResultsName("type").setParseAction(lambda s,l,t: [ ["type", t[0]] ] ) +\
+Feature = Group( Word(alphas+nums+"_-").setParseAction(lambda s,l,t: [ ["type", t[0]] ] ) +\
                  featLocation.setResultsName("location") +\
-                 OneOrMore( NumFeaturekeyval | QuoteFeaturekeyval | NoQuoteFeaturekeyval | FlagFeaturekeyval ) )
+                 OneOrMore( NumFeaturekeyval | QuoteFeaturekeyval | NoQuoteFeaturekeyval | FlagFeaturekeyval ) \
+                 )
 
 FeaturesEntry = Literal("FEATURES") + Literal("Location/Qualifiers") + Group(OneOrMore(Feature)).setResultsName("features")
 
-# GenBank Sequence Parser
 #===============================================================================
+# GenBank Sequence Parser
+
 # sequence is just a column-spaced big table of dna nucleotides
 # should it recognize full IUPAC alphabet?  NCBI uses n for unknown region
 Sequence = OneOrMore(Suppress(Word(nums)) + OneOrMore(Word("ACGTacgtNn")))
@@ -138,14 +147,16 @@ Sequence = OneOrMore(Suppress(Word(nums)) + OneOrMore(Word("ACGTacgtNn")))
 SequenceEntry = Suppress(Literal("ORIGIN")) + Sequence.setParseAction(lambda s,l,t: "".join(t) ).setResultsName("sequence")
 
 
-# Final GenBank Parser
 #===============================================================================
+# Final GenBank Parser
 
 #GB files with multiple records split by "//" sequence at beginning of line
 GBEnd = Literal("//")
 
+#Begin w. LOCUS, slurp all entries, then stop at the end!
 GB = LocusEntry + OneOrMore(FeaturesEntry | SequenceEntry | GenericEntry) + GBEnd
 
+#NCBI often returns sets of GB files
 multipleGB = OneOrMore(Group(GB))
 
 #===============================================================================
@@ -153,8 +164,8 @@ multipleGB = OneOrMore(Group(GB))
 #===============================================================================
 
 
-# Main JSON Conversion Routine
 #===============================================================================
+# Main JSON Conversion Routine
 
 def strip_indent(str):
     whitespace=re.compile("[\n]{1}(COMMENT){0,1}[ ]+")
@@ -172,18 +183,29 @@ def concat_dict(dlist):
             newdict[e[0]]=strip_indent(e[1])
     return newdict
 
-def append_dict(dlist):
-    """more or less dict(list of string pairs) but merges
-    vals with the same keys so no duplicates occur
-    """
-    newdict={}
-    for e in dlist:
-        if e[0] in newdict.keys():
-            newdict[e[0]]=(newdict[e[0]] + [ strip_indent(e[1]) ])
-        else:
-            newdict[e[0]]=[ strip_indent(e[1]) ]
-    return newdict
-            
+def toJSON(gbkstring):
+    parsed = multipleGB.parseString(gbkstring)
+    
+    jseqlist=[]
+    for seq in parsed:
+        #Print to STDOUT some details (useful for long multi-record parses)
+        print seq['name'], ":  length:", len(seq['sequence']) , " #features:" , len(seq['features'].asList())
+        
+        #build JSON object
+        jseq = { "__format__" : "jseq v0.1",
+                 "name" : seq["name"],
+                 "type" : seq["moleculetype"],
+                 "date" : seq["date"],
+                 "topology" : seq["topology"],
+                 "sequence" : seq["sequence"],
+                 "features" : map(dict,seq['features'].asList()),
+                 "annotations" : concat_dict(seq['generics'])
+                 }
+        jseqlist.append(jseq)
+
+    return jseqlist
+
+# command-line json conversion
 if __name__ == "__main__":
     #parse command line string
     usage = "usage: %prog [options] gbfile_in jseqfile_out"
@@ -192,29 +214,15 @@ if __name__ == "__main__":
     #                  help="output json file")
     (options, args) = parser.parse_args()
 
-    if len(args)>0:
+    #Load the GBK file and Build a JSON object out of the parse tree
+    if len(args)>1:
         infile = open(args[0],'r').read()
-        parsed = multipleGB.parseString(infile)
 
-        jseqlist=[]
-        for seq in parsed:
-
-            print seq['name'], ":  length:", len(seq['sequence']) , " #features:" , len(seq['features'].asList())
-            
-            jseq = { "name" : seq["name"],
-                     "type" : seq["moleculetype"],
-                     "date" : seq["date"],
-                     "topology" : seq["topology"],
-                     "sequence" : seq["sequence"],
-                     "features" : map(dict,seq['features'].asList()),
-                     "annotations" : concat_dict(seq['generics'])
-                     }
-
-            jseqlist.append(jseq)
-            
+        jseqlist=toJSON(infile)
+        
+        #Output to new JSON file
         outfile=open(args[1],'w')
         if len(jseqlist)>1:
             json.dump(jseqlist,outfile)
         else:
             json.dump(jseqlist[0],outfile)
-
