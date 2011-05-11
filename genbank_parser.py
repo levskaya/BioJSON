@@ -230,3 +230,4 @@ if __name__ == "__main__":
             json.dump(jseqlist,outfile)
         else:
             json.dump(jseqlist[0],outfile)
+
