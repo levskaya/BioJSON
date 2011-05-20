@@ -26,14 +26,14 @@ def printf(s,l,t):
 # LOCUS string, the first line of any genbank-sh file
 # unlike many shite parsers, this should work for NCBI, ApE, and NTI style gb files
 GoodLocus =    Literal("LOCUS") + \
-               Word(alphas+nums+'-_'+'\\').setResultsName("name") + \
+               Word(alphas+nums+'-_().'+'\\').setResultsName("name") + \
                Word(nums)+Suppress(Literal('bp')) + \
                Word(alphas+'-').setResultsName("moleculetype") + \
                (Literal("linear")|Literal("circular")).setResultsName("topology") + \
                Suppress(Optional(Word(alphas))) + \
                Word(alphas+nums+'-').setResultsName("date")
 
-#Older versions of ApE don't include a LOCUS name! Need separate def for this case:
+# Older versions of ApE don't include a LOCUS name! Need separate def for this case:
 BrokenLocus =  Literal("LOCUS").setResultsName("name") + \
                Word(nums)+Suppress(Literal('bp')) + \
                Word(alphas+'-').setResultsName("moleculetype") + \
