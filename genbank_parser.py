@@ -25,13 +25,23 @@ def printf(s,l,t):
 
 # LOCUS string, the first line of any genbank-sh file
 # unlike many shite parsers, this should work for NCBI, ApE, and NTI style gb files
-LocusEntry =   Literal("LOCUS") + \
+GoodLocus =    Literal("LOCUS") + \
                Word(alphas+nums+'-_'+'\\').setResultsName("name") + \
                Word(nums)+Suppress(Literal('bp')) + \
                Word(alphas+'-').setResultsName("moleculetype") + \
                (Literal("linear")|Literal("circular")).setResultsName("topology") + \
                Suppress(Optional(Word(alphas))) + \
                Word(alphas+nums+'-').setResultsName("date")
+
+#Older versions of ApE don't include a LOCUS name! Need separate def for this case:
+BrokenLocus =  Literal("LOCUS").setResultsName("name") + \
+               Word(nums)+Suppress(Literal('bp')) + \
+               Word(alphas+'-').setResultsName("moleculetype") + \
+               (Literal("linear")|Literal("circular")).setResultsName("topology") + \
+               Suppress(Optional(Word(alphas))) + \
+               Word(alphas+nums+'-').setResultsName("date")
+
+LocusEntry = (GoodLocus|BrokenLocus)
 
 #===============================================================================
 # Generic Entry
@@ -75,9 +85,9 @@ GenericEntry =  Group(CapWord + Combine(CharsNotIn("\n") + LineEnd() +\
 # also note the dumb 34.38 fuzzy slice notation
 # i.e. <45..900  says the real feature starts "somewhere" before pos 45
 #       45.48 says feature somewhere between bases 45->48
-# lot of weird annotations best avoided because the connote ~useless knowledge for synthetic design
+# lot of weird annotations best avoided because they connote ~useless knowledge for synthetic design
 #
-# if you don' know where something is, don't use it or guess and move on
+# if you don't know where something is, don't use it or guess and move on
 
 LPAREN = Suppress("(")
 RPAREN = Suppress(")")
@@ -120,8 +130,10 @@ def toInt(s,l,t):
 # Quoted KeyVal:   /key="value"
 QuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + QuotedString('"',multiline=True).setParseAction( strip_multiline ) )
 
-# UnQuoted KeyVal: /key=value  (I'm assuming it doesn't do multilines this way?)
-NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + OneOrMore(CharsNotIn("\n")) )
+# UnQuoted KeyVal: /key=value  (I'm assuming it doesn't do multilines this way? wrong! ApE does store long labels this way! sigh.)
+#NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + OneOrMore(CharsNotIn("\n")) )
+keyvalspacedline = White(exact=21)+CharsNotIn("/")+OneOrMore(CharsNotIn("\n"))+LineEnd()
+NoQuoteFeaturekeyval = Group(Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') + Combine(CharsNotIn("\n") + LineEnd() + ZeroOrMore( keyvalspacedline )))
 
 # Special Case for Numerical Vals:  /bases=12  OR  /bases="12"
 NumFeaturekeyval = Group( Suppress('/') + Word(alphas+nums+"_-") + Suppress('=') +\
@@ -219,13 +231,18 @@ if __name__ == "__main__":
     (options, args) = parser.parse_args()
 
     #Load the GBK file and Build a JSON object out of the parse tree
-    if len(args)>1:
+
+    if len(args)>0:
         infile = open(args[0],'r').read()
 
         jseqlist=toJSON(infile)
         
         #Output to new JSON file
-        outfile=open(args[1],'w')
+        if len(args)>1:
+            outfile=open(args[1],'w')
+        else:
+            outfile=open(args[0].replace(".gb",".json"),'w')
+        
         if len(jseqlist)>1:
             json.dump(jseqlist,outfile)
         else:
